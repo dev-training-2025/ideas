@@ -1,0 +1,118 @@
+// Models/LookupItem.cs
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
+
+public class LookupItem
+{
+    [BsonId]
+    [BsonRepresentation(BsonType.ObjectId)]
+    public string Id { get; set; }
+    public string Name { get; set; }
+    public string Type { get; set; }  // e.g., "Country", "DocStatus"
+    public string Code { get; set; }
+}
+
+// Services/MongoDBService.cs
+using MongoDB.Driver;
+
+public class MongoDBService
+{
+    private readonly IMongoCollection<LookupItem> _lookupsCollection;
+
+    public MongoDBService(IConfiguration configuration)
+    {
+        var mongoClient = new MongoClient(
+            configuration.GetValue<string>("MongoDB:ConnectionString"));
+
+        var mongoDatabase = mongoClient.GetDatabase(
+            configuration.GetValue<string>("MongoDB:DatabaseName"));
+
+        _lookupsCollection = mongoDatabase.GetCollection<LookupItem>("Lookups");
+    }
+
+    public async Task<List<LookupItem>> GetAllAsync() =>
+        await _lookupsCollection.Find(_ => true).ToListAsync();
+
+    public async Task<List<LookupItem>> GetByTypeAsync(string type) =>
+        await _lookupsCollection.Find(x => x.Type == type).ToListAsync();
+
+    public async Task<LookupItem> GetAsync(string id) =>
+        await _lookupsCollection.Find(x => x.Id == id).FirstOrDefaultAsync();
+
+    public async Task CreateAsync(LookupItem item) =>
+        await _lookupsCollection.InsertOneAsync(item);
+
+    public async Task UpdateAsync(string id, LookupItem item) =>
+        await _lookupsCollection.ReplaceOneAsync(x => x.Id == id, item);
+
+    public async Task RemoveAsync(string id) =>
+        await _lookupsCollection.DeleteOneAsync(x => x.Id == id);
+}
+
+// Controllers/LookupsController.cs
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("api/[controller]")]
+public class LookupsController : ControllerBase
+{
+    private readonly MongoDBService _mongoDBService;
+
+    public LookupsController(MongoDBService mongoDBService)
+    {
+        _mongoDBService = mongoDBService;
+    }
+
+    [HttpGet]
+    public async Task<List<LookupItem>> Get() =>
+        await _mongoDBService.GetAllAsync();
+
+    [HttpGet("type/{type}")]
+    public async Task<List<LookupItem>> GetByType(string type) =>
+        await _mongoDBService.GetByTypeAsync(type);
+
+    [HttpGet("{id:length(24)}")]
+    public async Task<ActionResult<LookupItem>> Get(string id)
+    {
+        var item = await _mongoDBService.GetAsync(id);
+
+        if (item is null)
+            return NotFound();
+
+        return item;
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Post(LookupItem item)
+    {
+        await _mongoDBService.CreateAsync(item);
+        return CreatedAtAction(nameof(Get), new { id = item.Id }, item);
+    }
+
+    [HttpPut("{id:length(24)}")]
+    public async Task<IActionResult> Update(string id, LookupItem updatedItem)
+    {
+        var item = await _mongoDBService.GetAsync(id);
+
+        if (item is null)
+            return NotFound();
+
+        updatedItem.Id = item.Id;
+        await _mongoDBService.UpdateAsync(id, updatedItem);
+
+        return NoContent();
+    }
+
+    [HttpDelete("{id:length(24)}")]
+    public async Task<IActionResult> Delete(string id)
+    {
+        var item = await _mongoDBService.GetAsync(id);
+
+        if (item is null)
+            return NotFound();
+
+        await _mongoDBService.RemoveAsync(id);
+
+        return NoContent();
+    }
+}
