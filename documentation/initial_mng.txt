@@ -86,11 +86,44 @@ public class MyController : ControllerBase
 Step 5: Configure appsettings.json
 Add MongoDB connection details:
 
-json
-Copy code
+
 {
   "DatabaseSettings": {
     "ConnectionString": "mongodb://localhost:27017",
     "DatabaseName": "MyDatabase"
   }
 }
+
+
+
+
+
+3. Generating an API Contract
+To define the API contract:
+
+Use Swagger: Add Swagger support to generate API documentation:
+
+
+dotnet add package Swashbuckle.AspNetCore
+Update Program.cs:
+
+csharp
+Copy code
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var app = builder.Build();
+
+app.UseSwagger();
+app.UseSwaggerUI();
+
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
+Access Swagger UI at http://localhost:5000/swagger.
+
+API Specification:
+
+Document the API endpoints using XML comments or Swagger annotations.
+
