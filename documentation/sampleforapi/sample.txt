@@ -1,0 +1,427 @@
+models
+
+// Models/CommonModels.cs
+namespace MongoAPI.Models
+{
+    public class Namespace
+    {
+        public string DataSource { get; set; }
+        public string Database { get; set; }
+        public string Collection { get; set; }
+    }
+
+    public class FilterBase
+    {
+        public object Filter { get; set; }
+    }
+
+    public class ProjectionBase
+    {
+        public object Projection { get; set; }
+    }
+}
+
+// Models/FindModels.cs
+namespace MongoAPI.Models
+{
+    public class FindOneRequest : Namespace
+    {
+        public object Filter { get; set; }
+        public object Projection { get; set; }
+    }
+
+    public class FindOneResponse
+    {
+        public object Document { get; set; }
+    }
+
+    public class FindRequest : FindOneRequest
+    {
+        public object Sort { get; set; }
+        public int? Limit { get; set; }
+        public int? Skip { get; set; }
+    }
+
+    public class FindResponse
+    {
+        public object[] Documents { get; set; }
+    }
+}
+
+// Models/InsertModels.cs
+namespace MongoAPI.Models
+{
+    public class InsertOneRequest : Namespace
+    {
+        public object Document { get; set; }
+    }
+
+    public class InsertOneResponse
+    {
+        public string InsertedId { get; set; }
+    }
+
+    public class InsertManyRequest : Namespace
+    {
+        public object[] Documents { get; set; }
+    }
+
+    public class InsertManyResponse
+    {
+        public string[] InsertedIds { get; set; }
+    }
+}
+
+// Models/UpdateModels.cs
+namespace MongoAPI.Models
+{
+    public class UpdateRequest : Namespace
+    {
+        public object Filter { get; set; }
+        public object Update { get; set; }
+        public bool Upsert { get; set; }
+    }
+
+    public class UpdateResponse
+    {
+        public long MatchedCount { get; set; }
+        public long ModifiedCount { get; set; }
+        public string UpsertedId { get; set; }
+    }
+}
+
+// Models/DeleteModels.cs
+namespace MongoAPI.Models
+{
+    public class DeleteRequest : Namespace
+    {
+        public object Filter { get; set; }
+    }
+
+    public class DeleteResponse
+    {
+        public long DeletedCount { get; set; }
+    }
+}
+
+// Models/AggregateModels.cs
+namespace MongoAPI.Models
+{
+    public class AggregateRequest : Namespace
+    {
+        public object[] Pipeline { get; set; }
+    }
+
+    public class AggregateResponse
+    {
+        public object[] Documents { get; set; }
+    }
+}
+
+
+
+
+
+
+
+
+controller
+
+using Microsoft.AspNetCore.Mvc;
+using MongoDB.Bson;
+using MongoDB.Driver;
+using MongoAPI.Models;
+using MongoAPI.Services;
+
+namespace MongoAPI.Controllers
+{
+    [ApiController]
+    [Route("action")]
+    public class MongoDbController : ControllerBase
+    {
+        private readonly IMongoDbService _mongoService;
+
+        public MongoDbController(IMongoDbService mongoService)
+        {
+            _mongoService = mongoService;
+        }
+
+        [HttpPost("findOne")]
+        public async Task<ActionResult<FindOneResponse>> FindOne([FromBody] FindOneRequest request)
+        {
+            var filter = BsonDocument.Parse(request.Filter.ToString());
+            var projection = request.Projection != null 
+                ? BsonDocument.Parse(request.Projection.ToString()) 
+                : null;
+
+            var result = await _mongoService.FindOneAsync(
+                request.Database,
+                request.Collection,
+                filter,
+                projection
+            );
+
+            return Ok(new FindOneResponse { Document = result });
+        }
+
+        [HttpPost("find")]
+        public async Task<ActionResult<FindResponse>> Find([FromBody] FindRequest request)
+        {
+            var filter = BsonDocument.Parse(request.Filter.ToString());
+            var projection = request.Projection != null 
+                ? BsonDocument.Parse(request.Projection.ToString()) 
+                : null;
+            var sort = request.Sort != null 
+                ? BsonDocument.Parse(request.Sort.ToString()) 
+                : null;
+
+            var results = await _mongoService.FindManyAsync(
+                request.Database,
+                request.Collection,
+                filter,
+                projection,
+                sort,
+                request.Skip,
+                request.Limit
+            );
+
+            return Ok(new FindResponse { Documents = results });
+        }
+
+        [HttpPost("insertOne")]
+        public async Task<ActionResult<InsertOneResponse>> InsertOne([FromBody] InsertOneRequest request)
+        {
+            var document = BsonDocument.Parse(request.Document.ToString());
+            var id = await _mongoService.InsertOneAsync(
+                request.Database,
+                request.Collection,
+                document
+            );
+
+            return Ok(new InsertOneResponse { InsertedId = id });
+        }
+
+        [HttpPost("insertMany")]
+        public async Task<ActionResult<InsertManyResponse>> InsertMany([FromBody] InsertManyRequest request)
+        {
+            var documents = request.Documents.Select(doc => BsonDocument.Parse(doc.ToString()));
+            var ids = await _mongoService.InsertManyAsync(
+                request.Database,
+                request.Collection,
+                documents
+            );
+
+            return Ok(new InsertManyResponse { InsertedIds = ids });
+        }
+
+        [HttpPost("updateOne")]
+        public async Task<ActionResult<UpdateResponse>> UpdateOne([FromBody] UpdateRequest request)
+        {
+            var filter = BsonDocument.Parse(request.Filter.ToString());
+            var update = BsonDocument.Parse(request.Update.ToString());
+
+            var result = await _mongoService.UpdateOneAsync(
+                request.Database,
+                request.Collection,
+                filter,
+                update,
+                request.Upsert
+            );
+
+            return Ok(new UpdateResponse 
+            { 
+                MatchedCount = result.MatchedCount,
+                ModifiedCount = result.ModifiedCount,
+                UpsertedId = result.UpsertedId?.ToString()
+            });
+        }
+
+        [HttpPost("updateMany")]
+        public async Task<ActionResult<UpdateResponse>> UpdateMany([FromBody] UpdateRequest request)
+        {
+            var filter = BsonDocument.Parse(request.Filter.ToString());
+            var update = BsonDocument.Parse(request.Update.ToString());
+
+            var result = await _mongoService.UpdateManyAsync(
+                request.Database,
+                request.Collection,
+                filter,
+                update,
+                request.Upsert
+            );
+
+            return Ok(new UpdateResponse 
+            { 
+                MatchedCount = result.MatchedCount,
+                ModifiedCount = result.ModifiedCount,
+                UpsertedId = result.UpsertedId?.ToString()
+            });
+        }
+
+        [HttpPost("deleteOne")]
+        public async Task<ActionResult<DeleteResponse>> DeleteOne([FromBody] DeleteRequest request)
+        {
+            var filter = BsonDocument.Parse(request.Filter.ToString());
+            var count = await _mongoService.DeleteOneAsync(
+                request.Database,
+                request.Collection,
+                filter
+            );
+
+            return Ok(new DeleteResponse { DeletedCount = count });
+        }
+
+        [HttpPost("deleteMany")]
+        public async Task<ActionResult<DeleteResponse>> DeleteMany([FromBody] DeleteRequest request)
+        {
+            var filter = BsonDocument.Parse(request.Filter.ToString());
+            var count = await _mongoService.DeleteManyAsync(
+                request.Database,
+                request.Collection,
+                filter
+            );
+
+            return Ok(new DeleteResponse { DeletedCount = count });
+        }
+
+        [HttpPost("aggregate")]
+        public async Task<ActionResult<AggregateResponse>> Aggregate([FromBody] AggregateRequest request)
+        {
+            var pipeline = request.Pipeline.Select(stage => BsonDocument.Parse(stage.ToString()));
+            var results = await _mongoService.AggregateAsync(
+                request.Database,
+                request.Collection,
+                pipeline
+            );
+
+            return Ok(new AggregateResponse { Documents = results });
+        }
+    }
+}
+
+
+
+
+
+MongoDB Service Implementation
+
+using MongoDB.Bson;
+using MongoDB.Driver;
+
+namespace MongoAPI.Services
+{
+    public interface IMongoDbService
+    {
+        Task<object> FindOneAsync(string database, string collection, BsonDocument filter, BsonDocument projection = null);
+        Task<object[]> FindManyAsync(string database, string collection, BsonDocument filter, BsonDocument projection = null, BsonDocument sort = null, int? skip = null, int? limit = null);
+        Task<string> InsertOneAsync(string database, string collection, BsonDocument document);
+        Task<string[]> InsertManyAsync(string database, string collection, IEnumerable<BsonDocument> documents);
+        Task<UpdateResult> UpdateOneAsync(string database, string collection, BsonDocument filter, BsonDocument update, bool upsert = false);
+        Task<UpdateResult> UpdateManyAsync(string database, string collection, BsonDocument filter, BsonDocument update, bool upsert = false);
+        Task<long> DeleteOneAsync(string database, string collection, BsonDocument filter);
+        Task<long> DeleteManyAsync(string database, string collection, BsonDocument filter);
+        Task<object[]> AggregateAsync(string database, string collection, IEnumerable<BsonDocument> pipeline);
+    }
+
+    public class MongoDbService : IMongoDbService
+    {
+        private readonly IMongoClient _client;
+
+        public MongoDbService(IConfiguration configuration)
+        {
+            var connectionString = configuration.GetValue<string>("MongoDB:ConnectionString");
+            _client = new MongoClient(connectionString);
+        }
+
+        private IMongoCollection<BsonDocument> GetCollection(string database, string collection)
+        {
+            return _client
+                .GetDatabase(database)
+                .GetCollection<BsonDocument>(collection);
+        }
+
+        public async Task<object> FindOneAsync(string database, string collection, BsonDocument filter, BsonDocument projection = null)
+        {
+            var options = new FindOptions<BsonDocument>
+            {
+                Projection = projection
+            };
+
+            var result = await GetCollection(database, collection)
+                .Find(filter)
+                .FirstOrDefaultAsync();
+
+            return result?.ToJson();
+        }
+
+        public async Task<object[]> FindManyAsync(string database, string collection, BsonDocument filter, BsonDocument projection = null, BsonDocument sort = null, int? skip = null, int? limit = null)
+        {
+            var options = new FindOptions<BsonDocument>
+            {
+                Projection = projection,
+                Sort = sort,
+                Skip = skip,
+                Limit = limit
+            };
+
+            var results = await GetCollection(database, collection)
+                .Find(filter)
+                .ToListAsync();
+
+            return results.Select(doc => doc.ToJson()).ToArray();
+        }
+
+        public async Task<string> InsertOneAsync(string database, string collection, BsonDocument document)
+        {
+            await GetCollection(database, collection)
+                .InsertOneAsync(document);
+
+            return document["_id"].ToString();
+        }
+
+        public async Task<string[]> InsertManyAsync(string database, string collection, IEnumerable<BsonDocument> documents)
+        {
+            await GetCollection(database, collection)
+                .InsertManyAsync(documents);
+
+            return documents.Select(doc => doc["_id"].ToString()).ToArray();
+        }
+
+        public async Task<UpdateResult> UpdateOneAsync(string database, string collection, BsonDocument filter, BsonDocument update, bool upsert = false)
+        {
+            var options = new UpdateOptions { IsUpsert = upsert };
+            return await GetCollection(database, collection)
+                .UpdateOneAsync(filter, update, options);
+        }
+
+        public async Task<UpdateResult> UpdateManyAsync(string database, string collection, BsonDocument filter, BsonDocument update, bool upsert = false)
+        {
+            var options = new UpdateOptions { IsUpsert = upsert };
+            return await GetCollection(database, collection)
+                .UpdateManyAsync(filter, update, options);
+        }
+
+        public async Task<long> DeleteOneAsync(string database, string collection, BsonDocument filter)
+        {
+            var result = await GetCollection(database, collection)
+                .DeleteOneAsync(filter);
+            return result.DeletedCount;
+        }
+
+        public async Task<long> DeleteManyAsync(string database, string collection, BsonDocument filter)
+        {
+            var result = await GetCollection(database, collection)
+                .DeleteManyAsync(filter);
+            return result.DeletedCount;
+        }
+
+        public async Task<object[]> AggregateAsync(string database, string collection, IEnumerable<BsonDocument> pipeline)
+        {
+            var results = await GetCollection(database, collection)
+                .Aggregate<BsonDocument>(pipeline.ToList())
+                .ToListAsync();
+
+            return results.Select(doc => doc.ToJson()).ToArray();
+        }
+    }
+}
