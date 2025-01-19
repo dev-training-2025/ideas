@@ -65,5 +65,95 @@
   </mat-tab-group>
 </div>
 
+logic
+
+import { Component, OnInit } from '@angular/core';
+import { FormBuilder, FormGroup } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
+
+@Component({
+  selector: 'app-project-form',
+  templateUrl: './project-form.component.html',
+  styleUrls: ['./project-form.component.scss']
+})
+export class ProjectFormComponent implements OnInit {
+  projectForm: FormGroup;
+  isNewProject = false;
+  projectTypes = ['KYC', 'AML', 'Onboarding']; // Example types
+  displayedColumns: string[] = ['name', 'type'];
+  assets = [
+    { name: 'Asset 1', type: 'Document' },
+    { name: 'Asset 2', type: 'Image' }
+  ]; // Mocked asset data
+
+  constructor(
+    private fb: FormBuilder,
+    private route: ActivatedRoute,
+    private router: Router
+  ) {
+    this.projectForm = this.fb.group({
+      name: [''],
+      startDate: [''],
+      endDate: [''],
+      type: [''],
+      notes: ['']
+    });
+  }
+
+  ngOnInit() {
+    const projectId = this.route.snapshot.paramMap.get('id');
+    this.isNewProject = !projectId; // If no ID, it's a new project
+
+    if (!this.isNewProject) {
+      // Load project details for editing (replace with API call)
+      const projectData = { name: 'Project A', startDate: '2025-01-01', endDate: '2025-12-31', type: 'KYC', notes: 'Some notes' };
+      this.projectForm.patchValue(projectData);
+    }
+  }
+
+  saveProject() {
+    if (this.projectForm.valid) {
+      const projectData = this.projectForm.value;
+      console.log('Saved Project:', projectData);
+      this.router.navigate(['/']); // Redirect back to project list
+    }
+  }
+}
+
+
+
+
+style
+
+.project-form-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+mat-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tab-content {
+  padding: 16px;
+}
+
+.full-width {
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.half-width {
+  width: 48%;
+  margin-right: 2%;
+  margin-bottom: 1rem;
+}
+
+table {
+  width: 100%;
+}
 
 
