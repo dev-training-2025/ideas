@@ -79,11 +79,11 @@ import { ActivatedRoute, Router } from '@angular/router';
 export class ProjectFormComponent implements OnInit {
   projectForm: FormGroup;
   isNewProject = false;
-  projectTypes = ['KYC', 'AML', 'Onboarding']; // Example types
+  projectTypes = ['aaa', 'bbb', 'ccc']; // Example types
   displayedColumns: string[] = ['name', 'type'];
   assets = [
-    { name: 'Asset 1', type: 'Document' },
-    { name: 'Asset 2', type: 'Image' }
+    { name: 'Asset 1', type: 'eee' },
+    { name: 'Asset 2', type: 'fff' }
   ]; // Mocked asset data
 
   constructor(
@@ -106,7 +106,7 @@ export class ProjectFormComponent implements OnInit {
 
     if (!this.isNewProject) {
       // Load project details for editing (replace with API call)
-      const projectData = { name: 'Project A', startDate: '2025-01-01', endDate: '2025-12-31', type: 'KYC', notes: 'Some notes' };
+      const projectData = { name: 'Project A', startDate: '2025-01-01', endDate: '2025-12-31', type: 'aaa', notes: 'Some notes' };
       this.projectForm.patchValue(projectData);
     }
   }
