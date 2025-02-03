@@ -1,0 +1,785 @@
+using Xunit;
+using FluentAssertions;
+using System.Text.Json;
+using MongoAPI.Models;
+using Newtonsoft.Json.Linq;
+
+namespace MongoAPI.Tests.Models
+{
+    public class CommonModelsTests
+    {
+        [Fact]
+        public void Namespace_ShouldHaveRequiredProperties()
+        {
+            // Arrange
+            var json = @"{
+                ""dataSource"": ""mongodb-atlas"",
+                ""database"": ""testdb"",
+                ""collection"": ""testcollection""
+            }";
+
+            // Act
+            var result = JsonSerializer.Deserialize<Namespace>(json);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.DataSource.Should().Be("mongodb-atlas");
+            result.Database.Should().Be("testdb");
+            result.Collection.Should().Be("testcollection");
+        }
+    }
+
+    public class FindModelsTests
+    {
+        [Fact]
+        public void FindOneRequest_ShouldDeserializeCorrectly()
+        {
+            // Arrange
+            var json = @"{
+                ""dataSource"": ""mongodb-atlas"",
+                ""database"": ""testdb"",
+                ""collection"": ""testcollection"",
+                ""filter"": { ""_id"": ""123"" },
+                ""projection"": { ""field1"": 1, ""field2"": 1 }
+            }";
+
+            // Act
+            var result = JsonSerializer.Deserialize<FindOneRequest>(json);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.DataSource.Should().Be("mongodb-atlas");
+            result.Database.Should().Be("testdb");
+            result.Collection.Should().Be("testcollection");
+            result.Filter.Should().NotBeNull();
+            result.Projection.Should().NotBeNull();
+            
+            var filterObj = JObject.Parse(result.Filter.ToString());
+            filterObj["_id"].ToString().Should().Be("123");
+        }
+
+        [Fact]
+        public void FindRequest_ShouldIncludePaginationAndSort()
+        {
+            // Arrange
+            var json = @"{
+                ""dataSource"": ""mongodb-atlas"",
+                ""database"": ""testdb"",
+                ""collection"": ""testcollection"",
+                ""filter"": { ""status"": ""active"" },
+                ""sort"": { ""createdAt"": -1 },
+                ""limit"": 10,
+                ""skip"": 20
+            }";
+
+            // Act
+            var result = JsonSerializer.Deserialize<FindRequest>(json);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Sort.Should().NotBeNull();
+            result.Limit.Should().Be(10);
+            result.Skip.Should().Be(20);
+            
+            var sortObj = JObject.Parse(result.Sort.ToString());
+            sortObj["createdAt"].Value<int>().Should().Be(-1);
+        }
+    }
+
+    public class InsertModelsTests
+    {
+        [Fact]
+        public void InsertOneRequest_ShouldDeserializeCorrectly()
+        {
+            // Arrange
+            var json = @"{
+                ""dataSource"": ""mongodb-atlas"",
+                ""database"": ""testdb"",
+                ""collection"": ""testcollection"",
+                ""document"": {
+                    ""name"": ""Test Document"",
+                    ""value"": 42
+                }
+            }";
+
+            // Act
+            var result = JsonSerializer.Deserialize<InsertOneRequest>(json);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Document.Should().NotBeNull();
+            
+            var docObj = JObject.Parse(result.Document.ToString());
+            docObj["name"].ToString().Should().Be("Test Document");
+            docObj["value"].Value<int>().Should().Be(42);
+        }
+
+        [Fact]
+        public void InsertManyRequest_ShouldHandleMultipleDocuments()
+        {
+            // Arrange
+            var json = @"{
+                ""dataSource"": ""mongodb-atlas"",
+                ""database"": ""testdb"",
+                ""collection"": ""testcollection"",
+                ""documents"": [
+                    { ""name"": ""Doc1"", ""value"": 1 },
+                    { ""name"": ""Doc2"", ""value"": 2 }
+                ]
+            }";
+
+            // Act
+            var result = JsonSerializer.Deserialize<InsertManyRequest>(json);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Documents.Should().NotBeNull();
+            result.Documents.Length.Should().Be(2);
+        }
+    }
+
+    public class UpdateModelsTests
+    {
+        [Fact]
+        public void UpdateRequest_ShouldHandleUpdateOperators()
+        {
+            // Arrange
+            var json = @"{
+                ""dataSource"": ""mongodb-atlas"",
+                ""database"": ""testdb"",
+                ""collection"": ""testcollection"",
+                ""filter"": { ""_id"": ""123"" },
+                ""update"": { 
+                    ""$set"": { ""status"": ""updated"" },
+                    ""$inc"": { ""counter"": 1 }
+                },
+                ""upsert"": true
+            }";
+
+            // Act
+            var result = JsonSerializer.Deserialize<UpdateRequest>(json);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Filter.Should().NotBeNull();
+            result.Update.Should().NotBeNull();
+            result.Upsert.Should().BeTrue();
+            
+            var updateObj = JObject.Parse(result.Update.ToString());
+            updateObj["$set"]["status"].ToString().Should().Be("updated");
+            updateObj["$inc"]["counter"].Value<int>().Should().Be(1);
+        }
+    }
+
+    public class DeleteModelsTests
+    {
+        [Fact]
+        public void DeleteRequest_ShouldDeserializeCorrectly()
+        {
+            // Arrange
+            var json = @"{
+                ""dataSource"": ""mongodb-atlas"",
+                ""database"": ""testdb"",
+                ""collection"": ""testcollection"",
+                ""filter"": { ""status"": ""inactive"" }
+            }";
+
+            // Act
+            var result = JsonSerializer.Deserialize<DeleteRequest>(json);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Filter.Should().NotBeNull();
+            
+            var filterObj = JObject.Parse(result.Filter.ToString());
+            filterObj["status"].ToString().Should().Be("inactive");
+        }
+    }
+
+    public class AggregateModelsTests
+    {
+        [Fact]
+        public void AggregateRequest_ShouldHandlePipeline()
+        {
+            // Arrange
+            var json = @"{
+                ""dataSource"": ""mongodb-atlas"",
+                ""database"": ""testdb"",
+                ""collection"": ""testcollection"",
+                ""pipeline"": [
+                    { ""$match"": { ""status"": ""active"" } },
+                    { ""$group"": { 
+                        ""_id"": ""$category"",
+                        ""count"": { ""$sum"": 1 }
+                    }}
+                ]
+            }";
+
+            // Act
+            var result = JsonSerializer.Deserialize<AggregateRequest>(json);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Pipeline.Should().NotBeNull();
+            result.Pipeline.Length.Should().Be(2);
+            
+            var matchStage = JObject.Parse(result.Pipeline[0].ToString());
+            matchStage["$match"]["status"].ToString().Should().Be("active");
+        }
+    }
+
+    public class ResponseModelsTests
+    {
+        [Fact]
+        public void FindOneResponse_ShouldSerializeCorrectly()
+        {
+            // Arrange
+            var response = new FindOneResponse
+            {
+                Document = new { _id = "123", name = "Test" }
+            };
+
+            // Act
+            var json = JsonSerializer.Serialize(response);
+            var deserialized = JsonSerializer.Deserialize<FindOneResponse>(json);
+
+            // Assert
+            deserialized.Should().NotBeNull();
+            deserialized.Document.Should().NotBeNull();
+        }
+
+        [Fact]
+        public void UpdateResponse_ShouldHandleCounters()
+        {
+            // Arrange
+            var response = new UpdateResponse
+            {
+                MatchedCount = 5,
+                ModifiedCount = 3,
+                UpsertedId = "123"
+            };
+
+            // Act
+            var json = JsonSerializer.Serialize(response);
+            var deserialized = JsonSerializer.Deserialize<UpdateResponse>(json);
+
+            // Assert
+            deserialized.MatchedCount.Should().Be(5);
+            deserialized.ModifiedCount.Should().Be(3);
+            deserialized.UpsertedId.Should().Be("123");
+        }
+    }
+}
+
+
+
+
+###service
+using Xunit;
+using Moq;
+using FluentAssertions;
+using MongoDB.Bson;
+using MongoDB.Driver;
+using MongoAPI.Services;
+using System.Text.Json;
+
+namespace MongoAPI.Tests.Services
+{
+    public class MongoDbServiceTests
+    {
+        private readonly Mock<IMongoClient> _mockClient;
+        private readonly Mock<IMongoDatabase> _mockDatabase;
+        private readonly Mock<IMongoCollection<BsonDocument>> _mockCollection;
+        private readonly Mock<IConfiguration> _mockConfig;
+
+        public MongoDbServiceTests()
+        {
+            _mockClient = new Mock<IMongoClient>();
+            _mockDatabase = new Mock<IMongoDatabase>();
+            _mockCollection = new Mock<IMongoCollection<BsonDocument>>();
+            _mockConfig = new Mock<IConfiguration>();
+
+            // Setup basic mocking chain
+            _mockClient
+                .Setup(c => c.GetDatabase(It.IsAny<string>(), null))
+                .Returns(_mockDatabase.Object);
+
+            _mockDatabase
+                .Setup(d => d.GetCollection<BsonDocument>(It.IsAny<string>(), null))
+                .Returns(_mockCollection.Object);
+
+            _mockConfig
+                .Setup(c => c.GetValue<string>("MongoDB:ConnectionString"))
+                .Returns("mongodb://localhost:27017");
+        }
+
+        [Fact]
+        public async Task FindOneAsync_ShouldReturnDocument_WhenDocumentExists()
+        {
+            // Arrange
+            var service = new MongoDbService(_mockConfig.Object);
+            var expectedDocument = new BsonDocument
+            {
+                { "_id", ObjectId.GenerateNewId() },
+                { "name", "Test Document" }
+            };
+
+            var mockCursor = new Mock<IAsyncCursor<BsonDocument>>();
+            mockCursor
+                .Setup(c => c.MoveNextAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            mockCursor
+                .Setup(c => c.Current)
+                .Returns(new[] { expectedDocument });
+
+            _mockCollection
+                .Setup(c => c.FindAsync(
+                    It.IsAny<FilterDefinition<BsonDocument>>(),
+                    It.IsAny<FindOptions<BsonDocument, BsonDocument>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(mockCursor.Object);
+
+            // Act
+            var result = await service.FindOneAsync(
+                "testDb",
+                "testCollection",
+                new BsonDocument("name", "Test Document")
+            );
+
+            // Assert
+            result.Should().NotBeNull();
+            var resultDoc = BsonDocument.Parse(result.ToString());
+            resultDoc["name"].AsString.Should().Be("Test Document");
+        }
+
+        [Fact]
+        public async Task FindManyAsync_ShouldHandlePagination()
+        {
+            // Arrange
+            var service = new MongoDbService(_mockConfig.Object);
+            var documents = new List<BsonDocument>
+            {
+                new BsonDocument { { "name", "Doc1" } },
+                new BsonDocument { { "name", "Doc2" } }
+            };
+
+            var mockCursor = new Mock<IAsyncCursor<BsonDocument>>();
+            mockCursor
+                .Setup(c => c.MoveNextAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            mockCursor
+                .Setup(c => c.Current)
+                .Returns(documents);
+
+            _mockCollection
+                .Setup(c => c.FindAsync(
+                    It.IsAny<FilterDefinition<BsonDocument>>(),
+                    It.IsAny<FindOptions<BsonDocument, BsonDocument>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(mockCursor.Object);
+
+            // Act
+            var result = await service.FindManyAsync(
+                "testDb",
+                "testCollection",
+                new BsonDocument(),
+                null,
+                new BsonDocument("name", 1),
+                1,
+                2
+            );
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Length.Should().Be(2);
+        }
+
+        [Fact]
+        public async Task InsertOneAsync_ShouldReturnId()
+        {
+            // Arrange
+            var service = new MongoDbService(_mockConfig.Object);
+            var document = new BsonDocument
+            {
+                { "_id", ObjectId.GenerateNewId() },
+                { "name", "New Document" }
+            };
+
+            _mockCollection
+                .Setup(c => c.InsertOneAsync(
+                    It.IsAny<BsonDocument>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            // Act
+            var result = await service.InsertOneAsync(
+                "testDb",
+                "testCollection",
+                document
+            );
+
+            // Assert
+            result.Should().NotBeNull();
+            ObjectId.TryParse(result, out _).Should().BeTrue();
+        }
+
+        [Fact]
+        public async Task UpdateOneAsync_ShouldHandleUpsert()
+        {
+            // Arrange
+            var service = new MongoDbService(_mockConfig.Object);
+            var filter = new BsonDocument("_id", ObjectId.GenerateNewId());
+            var update = new BsonDocument("$set", new BsonDocument("name", "Updated"));
+
+            _mockCollection
+                .Setup(c => c.UpdateOneAsync(
+                    It.IsAny<FilterDefinition<BsonDocument>>(),
+                    It.IsAny<UpdateDefinition<BsonDocument>>(),
+                    It.IsAny<UpdateOptions>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new UpdateResult.Acknowledged(1, 1, BsonValue.Create(ObjectId.GenerateNewId())));
+
+            // Act
+            var result = await service.UpdateOneAsync(
+                "testDb",
+                "testCollection",
+                filter,
+                update,
+                true
+            );
+
+            // Assert
+            result.Should().NotBeNull();
+            result.ModifiedCount.Should().Be(1);
+            result.UpsertedId.Should().NotBeNull();
+        }
+
+        [Fact]
+        public async Task DeleteOneAsync_ShouldReturnDeletedCount()
+        {
+            // Arrange
+            var service = new MongoDbService(_mockConfig.Object);
+            var filter = new BsonDocument("_id", ObjectId.GenerateNewId());
+
+            _mockCollection
+                .Setup(c => c.DeleteOneAsync(
+                    It.IsAny<FilterDefinition<BsonDocument>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DeleteResult.Acknowledged(1));
+
+            // Act
+            var result = await service.DeleteOneAsync(
+                "testDb",
+                "testCollection",
+                filter
+            );
+
+            // Assert
+            result.Should().Be(1);
+        }
+    }
+}
+
+
+####controller
+using Xunit;
+using Moq;
+using FluentAssertions;
+using Microsoft.AspNetCore.Mvc;
+using MongoDB.Bson;
+using MongoAPI.Controllers;
+using MongoAPI.Models;
+using MongoAPI.Services;
+
+namespace MongoAPI.Tests.Controllers
+{
+    public class MongoDbControllerTests
+    {
+        private readonly Mock<IMongoDbService> _mockMongoService;
+        private readonly MongoDbController _controller;
+
+        public MongoDbControllerTests()
+        {
+            _mockMongoService = new Mock<IMongoDbService>();
+            _controller = new MongoDbController(_mockMongoService.Object);
+        }
+
+        [Fact]
+        public async Task FindOne_ShouldReturnDocument_WhenDocumentExists()
+        {
+            // Arrange
+            var request = new FindOneRequest
+            {
+                DataSource = "mongodb-atlas",
+                Database = "testDb",
+                Collection = "testCollection",
+                Filter = new { name = "Test" }
+            };
+
+            var expectedDocument = new { _id = "123", name = "Test" };
+            _mockMongoService
+                .Setup(s => s.FindOneAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<BsonDocument>(),
+                    It.IsAny<BsonDocument>()))
+                .ReturnsAsync(expectedDocument);
+
+            // Act
+            var result = await _controller.FindOne(request);
+
+            // Assert
+            var okResult = result.Result.Should().BeOfType<OkObjectResult>().Subject;
+            var response = okResult.Value.Should().BeOfType<FindOneResponse>().Subject;
+            response.Document.Should().NotBeNull();
+        }
+
+        [Fact]
+        public async Task Find_ShouldHandleNullResults()
+        {
+            // Arrange
+            var request = new FindRequest
+            {
+                DataSource = "mongodb-atlas",
+                Database = "testDb",
+                Collection = "testCollection",
+                Filter = new { status = "inactive" }
+            };
+
+            _mockMongoService
+                .Setup(s => s.FindManyAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<BsonDocument>(),
+                    It.IsAny<BsonDocument>(),
+                    It.IsAny<BsonDocument>(),
+                    It.IsAny<int?>(),
+                    It.IsAny<int?>()))
+                .ReturnsAsync(Array.Empty<object>());
+
+            // Act
+            var result = await _controller.Find(request);
+
+            // Assert
+            var okResult = result.Result.Should().BeOfType<OkObjectResult>().Subject;
+            var response = okResult.Value.Should().BeOfType<FindResponse>().Subject;
+            response.Documents.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task InsertOne_ShouldHandleValidDocument()
+        {
+            // Arrange
+            var request = new InsertOneRequest
+            {
+                DataSource = "mongodb-atlas",
+                Database = "testDb",
+                Collection = "testCollection",
+                Document = new { name = "New Document" }
+            };
+
+            _mockMongoService
+                .Setup(s => s.InsertOneAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<BsonDocument>()))
+                .ReturnsAsync("123");
+
+            // Act
+            var result = await _controller.InsertOne(request);
+
+            // Assert
+            var okResult = result.Result.Should().BeOfType<OkObjectResult>().Subject;
+            var response = okResult.Value.Should().BeOfType<InsertOneResponse>().Subject;
+            response.InsertedId.Should().Be("123");
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        public async Task UpdateOne_ShouldHandleInvalidFilter(string invalidFilter)
+        {
+            // Arrange
+            var request = new UpdateRequest
+            {
+                DataSource = "mongodb-atlas",
+                Database = "testDb",
+                Collection = "testCollection",
+                Filter = invalidFilter,
+                Update = new { $set = new { status = "updated" } }
+            };
+
+            // Act
+            var result = await _controller.UpdateOne(request);
+
+            // Assert
+            result.Result.Should().BeOfType<BadRequestObjectResult>();
+        }
+
+        [Fact]
+        public async Task DeleteOne_ShouldReturnDeletedCount()
+        {
+            // Arrange
+            var request = new DeleteRequest
+            {
+                DataSource = "mongodb-atlas",
+                Database = "testDb",
+                Collection = "testCollection",
+                Filter = new { status = "inactive" }
+            };
+
+            _mockMongoService
+                .Setup(s => s.DeleteOneAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<BsonDocument>()))
+                .ReturnsAsync(1);
+
+            // Act
+            var result = await _controller.DeleteOne(request);
+
+            // Assert
+            var okResult = result.Result.Should().BeOfType<OkObjectResult>().Subject;
+            var response = okResult.Value.Should().BeOfType<DeleteResponse>().Subject;
+            response.DeletedCount.Should().Be(1);
+        }
+
+        [Fact]
+        public async Task Aggregate_ShouldHandleComplexPipeline()
+        {
+            // Arrange
+            var request = new AggregateRequest
+            {
+                DataSource = "mongodb-atlas",
+                Database = "testDb",
+                Collection = "testCollection",
+                Pipeline = new[]
+                {
+                    new { $match = new { status = "active" } },
+                    new { $group = new { _id = "$category", count = new { $sum = 1 } } }
+                }
+            };
+
+            var expectedResults = new[]
+            {
+                new { _id = "category1", count = 5 },
+                new { _id = "category2", count = 3 }
+            };
+
+            _mockMongoService
+                .Setup(s => s.AggregateAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<IEnumerable<BsonDocument>>()))
+                .ReturnsAsync(expectedResults);
+
+            // Act
+            var result = await _controller.Aggregate(request);
+
+            // Assert
+            var okResult = result.Result.Should().BeOfType<OkObjectResult>().Subject;
+            var response = okResult.Value.Should().BeOfType<AggregateResponse>().Subject;
+            response.Documents.Should().NotBeEmpty();
+        }
+    }
+}
+
+
+###initial failing tests
+
+using Xunit;
+using FluentAssertions;
+using MongoAPI.Models;
+
+namespace MongoAPI.Tests
+{
+    public class FindOneRequestTests
+    {
+        [Fact]
+        public void FindOneRequest_ShouldRequireDatabase()
+        {
+            // Arrange
+            var request = new FindOneRequest
+            {
+                DataSource = "mongodb-atlas",
+                // Database intentionally omitted
+                Collection = "testCollection",
+                Filter = new { name = "test" }
+            };
+
+            // Act
+            Action act = () => ValidateRequest(request);
+
+            // Assert
+            act.Should().Throw<ValidationException>()
+                .WithMessage("*Database is required*");
+        }
+
+        private void ValidateRequest(FindOneRequest request)
+        {
+            if (string.IsNullOrEmpty(request.Database))
+                throw new ValidationException("Database is required");
+        }
+    }
+
+    public class MongoDbServiceBasicTests
+    {
+        [Fact]
+        public async Task FindOneAsync_ShouldReturnNull_WhenDocumentNotFound()
+        {
+            // Arrange
+            IMongoDbService service = new MongoDbService(/* dependencies will be needed */);
+            
+            // Act
+            var result = await service.FindOneAsync(
+                "testDb",
+                "testCollection",
+                new { name = "nonexistent" }
+            );
+
+            // Assert
+            result.Should().BeNull();
+        }
+    }
+
+    public class MongoDbControllerBasicTests
+    {
+        [Fact]
+        public async Task FindOne_ShouldReturn404_WhenDocumentNotFound()
+        {
+            // Arrange
+            var controller = new MongoDbController(/* service mock will be needed */);
+            var request = new FindOneRequest
+            {
+                DataSource = "mongodb-atlas",
+                Database = "testDb",
+                Collection = "testCollection",
+                Filter = new { name = "nonexistent" }
+            };
+
+            // Act
+            var result = await controller.FindOne(request);
+
+            // Assert
+            result.Should().BeOfType<NotFoundResult>();
+        }
+    }
+}
+
+// This test will initially fail because we haven't implemented the model yet
+public class InitialModelTests
+{
+    [Fact]
+    public void FindOneRequest_ShouldHaveRequiredProperties()
+    {
+        // Arrange & Act
+        var request = new FindOneRequest();
+
+        // Assert
+        request.Should().NotBeNull();
+        request.GetType().Should().HaveProperty("Database");
+        request.GetType().Should().HaveProperty("Collection");
+        request.GetType().Should().HaveProperty("Filter");
+    }
+}
