@@ -458,7 +458,7 @@ public class RequestValidationMiddleware
             return;
         }
 
-        // Store the Tenant ID in HttpContext for later retrieval
+        // Store the Customer ID in HttpContext for later retrieval
         context.Items["CustomerId"] = customerId.ToString();
 
         await _next(context);
