@@ -425,3 +425,78 @@ namespace MongoAPI.Services
         }
     }
 }
+
+
+
+
+//middleware
+
+public class RequestValidationMiddleware
+{
+    private readonly RequestDelegate _next;
+
+    public RequestValidationMiddleware(RequestDelegate next)
+    {
+        _next = next;
+    }
+
+    public async Task Invoke(HttpContext context)
+    {
+        // Check if the request content type is JSON
+        if (!context.Request.ContentType?.Contains("application/json") == true)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid content type. Expected application/json.");
+            return;
+        }
+
+        // Check if CustomerId header exists
+        if (!context.Request.Headers.TryGetValue("CustomerId", out var customerId) || string.IsNullOrWhiteSpace(customerId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Missing or invalid CustomerId header.");
+            return;
+        }
+
+        // Store the Tenant ID in HttpContext for later retrieval
+        context.Items["CustomerId"] = customerId.ToString();
+
+        await _next(context);
+    }
+}
+
+
+
+//Base validation
+public abstract class BaseRequestValidator<T> : AbstractValidator<T> where T : CommonRequest
+{
+    public BaseRequestValidator()
+    {
+        RuleFor(x => x.DatabaseName)
+            .NotEmpty().WithMessage("DatabaseName is required.")
+            .MaximumLength(100);
+
+        RuleFor(x => x.CollectionName)
+            .NotEmpty().WithMessage("CollectionName is required.")
+            .MaximumLength(100);
+    }
+}
+
+//Inherit in Other Validators
+public class InsertOneRequestValidator : BaseRequestValidator<InsertOneRequest>
+{
+    public InsertOneRequestValidator()
+    {
+        RuleFor(x => x.Document)
+            .NotNull().WithMessage("Document is required.");
+    }
+}
+
+public class UpdateOneRequestValidator : BaseRequestValidator<UpdateOneRequest>
+{
+    public UpdateOneRequestValidator()
+    {
+        RuleFor(x => x.UpdateFields)
+            .NotNull().WithMessage("UpdateFields is required.");
+    }
+}
