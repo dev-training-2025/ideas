@@ -500,3 +500,154 @@ public class UpdateOneRequestValidator : BaseRequestValidator<UpdateOneRequest>
             .NotNull().WithMessage("UpdateFields is required.");
     }
 }
+
+
+//config
+1. Extract customerId from Request Headers in Controller
+2. Create a Service to Fetch Customer Config
+3. Register the Service in Program.cs
+4. Define the Customer Config Model
+public interface ICustomerConfigService
+{
+    Task<string?> GetDatabaseNameAsync(string customerId);
+}
+
+public class CustomerConfigService : ICustomerConfigService
+{
+    private readonly IMongoCollection<CustomerConfig> _customerConfigCollection;
+
+    public CustomerConfigService(IMongoClient mongoClient)
+    {
+        var database = mongoClient.GetDatabase("ConfigDB"); // Static config DB
+        _customerConfigCollection = database.GetCollection<CustomerConfig>("CustomerConfigs");
+    }
+
+    public async Task<string?> GetDatabaseNameAsync(string customerId)
+    {
+        var filter = Builders<CustomerConfig>.Filter.Eq(c => c.CustomerId, customerId);
+        var customerConfig = await _customerConfigCollection.Find(filter).FirstOrDefaultAsync();
+        return customerConfig?.DatabaseName;
+    }
+}
+
+public class CustomerConfig
+{
+    [BsonId]
+    [BsonRepresentation(BsonType.ObjectId)]
+    public string Id { get; set; }
+
+    [BsonElement("customerId")]
+    public string CustomerId { get; set; }
+
+    [BsonElement("databaseName")]
+    public string DatabaseName { get; set; }
+}
+
+//re
+1. Update Customer Config Collection Structure
+Instead of storing the connection string directly, store a Key Vault secret name or reference:
+
+public class CustomerConfig
+{
+    [BsonId]
+    [BsonRepresentation(BsonType.ObjectId)]
+    public string Id { get; set; }
+
+    [BsonElement("customerId")]
+    public string CustomerId { get; set; }
+
+    [BsonElement("databaseName")]
+    public string DatabaseName { get; set; }
+
+    [BsonElement("keyVaultSecretName")]
+    public string KeyVaultSecretName { get; set; } // Stores Key Vault reference
+}
+
+2. Retrieve Connection String Securely from Azure Key Vault
+
+public interface ICustomerConfigService
+{
+    Task<string?> GetDatabaseNameAsync(string customerId);
+    Task<string?> GetBlobStorageConnectionStringAsync(string customerId);
+}
+
+public class CustomerConfigService : ICustomerConfigService
+{
+    private readonly IMongoCollection<CustomerConfig> _customerConfigCollection;
+    private readonly SecretClient _secretClient;
+
+    public CustomerConfigService(IMongoClient mongoClient, SecretClient secretClient)
+    {
+        var database = mongoClient.GetDatabase("ConfigDB"); // Static config DB
+        _customerConfigCollection = database.GetCollection<CustomerConfig>("CustomerConfigs");
+        _secretClient = secretClient;
+    }
+
+    public async Task<string?> GetDatabaseNameAsync(string customerId)
+    {
+        var filter = Builders<CustomerConfig>.Filter.Eq(c => c.CustomerId, customerId);
+        var customerConfig = await _customerConfigCollection.Find(filter).FirstOrDefaultAsync();
+        return customerConfig?.DatabaseName;
+    }
+
+    public async Task<string?> GetBlobStorageConnectionStringAsync(string customerId)
+    {
+        var filter = Builders<CustomerConfig>.Filter.Eq(c => c.CustomerId, customerId);
+        var customerConfig = await _customerConfigCollection.Find(filter).FirstOrDefaultAsync();
+        if (customerConfig == null || string.IsNullOrEmpty(customerConfig.KeyVaultSecretName))
+        {
+            return null; // No storage config found
+        }
+
+        // Retrieve secret from Azure Key Vault
+        KeyVaultSecret secret = await _secretClient.GetSecretAsync(customerConfig.KeyVaultSecretName);
+        return secret.Value;
+    }
+}
+
+Configure Key Vault in Program.cs
+Set Up Azure Key Vault Authentication
+Ensure that your app has access to Azure Key Vault (e.g., via a managed identity or a client secret).
+
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+
+var keyVaultUrl = builder.Configuration["AzureKeyVault:VaultUri"]; // Stored in appsettings.json or env variables
+var credential = new DefaultAzureCredential(); // Uses Managed Identity if running in Azure
+
+var secretClient = new SecretClient(new Uri(keyVaultUrl), credential);
+
+builder.Services.AddSingleton(secretClient);
+builder.Services.AddSingleton<ICustomerConfigService, CustomerConfigService>();
+
+4. Securely Access Blob Storage in Controller
+In your file upload controller, retrieve the connection string from Key Vault before uploading files.
+
+[HttpPost("upload")]
+public async Task<IActionResult> UploadFile(
+    [FromHeader(Name = "customerId")] string customerId,
+    IFormFile file)
+{
+    if (string.IsNullOrEmpty(customerId))
+    {
+        return BadRequest("Missing customerId in headers.");
+    }
+
+    var connectionString = await _customerConfigService.GetBlobStorageConnectionStringAsync(customerId);
+    if (string.IsNullOrEmpty(connectionString))
+    {
+        return NotFound("Blob Storage connection not found for customer.");
+    }
+
+    // Upload to Azure Blob Storage
+    var blobServiceClient = new BlobServiceClient(connectionString);
+    var containerClient = blobServiceClient.GetBlobContainerClient("customer-files");
+    var blobClient = containerClient.GetBlobClient(file.FileName);
+
+    using (var stream = file.OpenReadStream())
+    {
+        await blobClient.UploadAsync(stream, true);
+    }
+
+    return Ok("File uploaded successfully.");
+}
