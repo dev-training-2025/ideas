@@ -1,0 +1,106 @@
+Prerequisites
+Azure Key Vault set up with secrets.
+Azure Managed Identity enabled for your service.
+A database (SQL/MongoDB/etc.) that maps customerId to a KeyVaultName.
+Azure SDK for .NET (Azure.Security.KeyVault.Secrets and Azure.Identity packages installed).
+
+public class CustomerConfig
+{
+    public string CustomerId { get; set; }  // customer identifier
+    public string KeyVaultName { get; set; }  // Key Vault name
+}
+
+
+Create a Service to Fetch Key Vault Secrets
+This service:
+
+Gets the Key Vault name from a database.
+Uses Managed Identity to connect and retrieve secrets dynamically.
+
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+using Microsoft.Extensions.Caching.Memory;
+using MongoDB.Driver; 
+
+public class KeyVaultService
+{
+    private readonly IMongoCollection<CustomerConfig> _customerConfigs;
+    private readonly IMemoryCache _cache; // Caching to reduce Key Vault API calls
+
+    public KeyVaultService(IMongoClient mongoClient, IMemoryCache cache)
+    {
+        var database = mongoClient.GetDatabase("CustomerDatabase");
+        _customerConfigs = database.GetCollection<CustomerConfig>("CustomerConfigs");
+        _cache = cache;
+    }
+
+    public async Task<string> GetSecretAsync(string customerId, string secretName)
+    {
+        // Try cache first to reduce DB and Key Vault calls
+        if (_cache.TryGetValue($"{customerId}-{secretName}", out string cachedSecret))
+        {
+            return cachedSecret;
+        }
+
+        // Fetch the Key Vault name for the customer
+        var customer = await _customerConfigs.Find(t => t.CustomerId == customerId).FirstOrDefaultAsync();
+        if (customer == null)
+        {
+            throw new Exception("customer configuration not found");
+        }
+
+        string keyVaultUrl = $"https://{customer.KeyVaultName}.vault.azure.net/";
+
+        // Connect to Key Vault using Managed Identity
+        var client = new SecretClient(new Uri(keyVaultUrl), new DefaultAzureCredential());
+        var secret = await client.GetSecretAsync(secretName);
+
+        // Store in cache for 10 minutes
+        _cache.Set($"{customerId}-{secretName}", secret.Value.Value, TimeSpan.FromMinutes(10));
+
+        return secret.Value.Value;
+    }
+}
+
+
+
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<KeyVaultService>();
+
+
+
+Use the Service in a Controller
+A simple API endpoint that retrieves secrets dynamically.
+
+
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("api/[controller]")]
+public class SecretController : ControllerBase
+{
+    private readonly KeyVaultService _keyVaultService;
+
+    public SecretController(KeyVaultService keyVaultService)
+    {
+        _keyVaultService = keyVaultService;
+    }
+
+    [HttpGet("get-secret")]
+    public async Task<IActionResult> GetSecret([FromHeader] string customerId, [FromQuery] string secretName)
+    {
+        if (string.IsNullOrEmpty(customerId) || string.IsNullOrEmpty(secretName))
+        {
+            return BadRequest("Missing parameters");
+        }
+
+        var secretValue = await _keyVaultService.GetSecretAsync(customerId, secretName);
+        return Ok(new { SecretValue = secretValue });
+    }
+}
+
+
+Testing the API
+Request:
+
+GET /api/secret/get-secret?secretName=StorageConnectionString
