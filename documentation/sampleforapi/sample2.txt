@@ -104,3 +104,87 @@ Testing the API
 Request:
 
 GET /api/secret/get-secret?secretName=StorageConnectionString
+
+
+
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+using Microsoft.Extensions.Caching.Memory;
+using MongoDB.Driver;
+using Microsoft.Extensions.Logging;
+
+public class SecretService
+{
+    private readonly IMemoryCache _cache;
+    private readonly SecretClient _keyVaultClient;
+    private readonly ILogger<SecretService> _logger;
+
+    public SecretService(IConfiguration configuration, IMemoryCache cache, ILogger<SecretService> logger)
+    {
+        _cache = cache;
+        _logger = logger;
+
+        string keyVaultUrl = configuration["KeyVault:Url"];
+        _keyVaultClient = new SecretClient(new Uri(keyVaultUrl), new DefaultAzureCredential());
+
+        CacheGlobalAdminDbConnection();
+    }
+
+    private void CacheGlobalAdminDbConnection()
+    {
+        try
+        {
+            var globalDbSecret = _keyVaultClient.GetSecret("GlobalAdminDB").Value.Value;
+
+            var cacheEntryOptions = new MemoryCacheEntryOptions()
+                .SetAbsoluteExpiration(TimeSpan.FromHours(1)) // **Expires in 1 hour**
+                .RegisterPostEvictionCallback((key, value, reason, state) =>
+                {
+                    if (reason == EvictionReason.Expired)
+                    {
+                        CacheGlobalAdminDbConnection(); // **Auto-renew when expired**
+                    }
+                });
+
+            _cache.Set("GlobalAdminDB", globalDbSecret, cacheEntryOptions);
+
+            _logger.LogInformation("Cached Global Admin DB Connection String.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to fetch Global Admin DB Connection: {ex.Message}");
+            throw;
+        }
+    }
+
+    public string GetGlobalAdminDbConnection()
+    {
+        return _cache.TryGetValue("GlobalAdminDB", out string connectionString) 
+            ? connectionString 
+            : throw new Exception("⚠ Global Admin DB connection is missing in cache!");
+    }
+}
+
+
+builder.Services.AddSingleton<SecretService>();
+
+Use in Other Services
+Now, any service can fetch the cached Global Admin DB connection.
+
+
+public class SomeService
+{
+    private readonly SecretService _secretService;
+
+    public SomeService(SecretService secretService)
+    {
+        _secretService = secretService;
+    }
+
+    public void ConnectToGlobalDb()
+    {
+        string connectionString = _secretService.GetGlobalAdminDbConnection();
+        var client = new MongoClient(connectionString);
+        var db = client.GetDatabase("GlobalAdminDB");
+    }
+}
