@@ -188,3 +188,82 @@ public class SomeService
         var db = client.GetDatabase("GlobalAdminDB");
     }
 }
+
+
+OR proactivley 
+
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+public class GlobalDbSecretRefreshService : BackgroundService
+{
+    private readonly IMemoryCache _cache;
+    private readonly SecretClient _keyVaultClient;
+    private readonly ILogger<GlobalDbSecretRefreshService> _logger;
+
+    public GlobalDbSecretRefreshService(IConfiguration configuration, IMemoryCache cache, ILogger<GlobalDbSecretRefreshService> logger)
+    {
+        _cache = cache;
+        _logger = logger;
+
+        string keyVaultUrl = configuration["KeyVault:Url"];
+        _keyVaultClient = new SecretClient(new Uri(keyVaultUrl), new DefaultAzureCredential());
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await RefreshGlobalAdminDbConnection();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error refreshing Global Admin DB connection: {ex.Message}");
+            }
+
+            // Wait for 55 minutes before refreshing again
+            await Task.Delay(TimeSpan.FromMinutes(55), stoppingToken);
+        }
+    }
+
+    private async Task RefreshGlobalAdminDbConnection()
+    {
+        var secret = await _keyVaultClient.GetSecretAsync("GlobalAdminDB");
+        string newConnectionString = secret.Value.Value;
+
+        _cache.Set("GlobalAdminDB", newConnectionString, new MemoryCacheEntryOptions()
+            .SetAbsoluteExpiration(TimeSpan.FromHours(1))); // Keep it fresh for 1 hour
+
+        _logger.LogInformation("Refreshed Global Admin DB Connection String.");
+    }
+}
+
+
+
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<SecretService>();
+builder.Services.AddHostedService<GlobalDbSecretRefreshService>(); // Auto-refresh service
+builder.Services.AddLogging();
+
+
+public class SecretService
+{
+    private readonly IMemoryCache _cache;
+
+    public SecretService(IMemoryCache cache)
+    {
+        _cache = cache;
+    }
+
+    public string GetGlobalAdminDbConnection()
+    {
+        return _cache.TryGetValue("GlobalAdminDB", out string connectionString) 
+            ? connectionString 
+            : throw new Exception("Global Admin DB connection is missing in cache!");
+    }
+}
