@@ -394,3 +394,128 @@ public class MyService
     }
 }
 
+
+//
+
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using MongoDB.Driver;
+using Microsoft.Extensions.Caching.Memory;
+
+public class CollectionConfigService
+{
+    private readonly IMongoDatabase _globalDb;
+    private readonly IMemoryCache _cache;
+    
+    public CollectionConfigService(IMongoClient globalClient, IMemoryCache cache)
+    {
+        _globalDb = globalClient.GetDatabase("GlobalAdminDB"); // Change to actual global DB name
+        _cache = cache;
+    }
+
+    public async Task LoadCollectionConfigAsync()
+    {
+        var configCollection = _globalDb.GetCollection<TenantConfig>("TenantConfig");
+        var config = await configCollection.Find(c => c.Id == "global-config").FirstOrDefaultAsync();
+
+        if (config != null)
+        {
+            _cache.Set("SystemCollections", config.SystemCollections);
+            _cache.Set("TenantCollections", config.TenantCollections);
+            _cache.Set("TenantMappings", config.Tenants);
+        }
+    }
+
+    public bool IsGlobalCollection(string collectionName)
+    {
+        return _cache.TryGetValue("SystemCollections", out List<string> systemCollections) && 
+               systemCollections.Contains(collectionName);
+    }
+
+    public bool IsTenantCollection(string collectionName)
+    {
+        return _cache.TryGetValue("TenantCollections", out List<string> tenantCollections) &&
+               tenantCollections.Contains(collectionName);
+    }
+
+    public string GetTenantDatabase(string tenantId)
+    {
+        if (_cache.TryGetValue("TenantMappings", out List<TenantConfig.TenantInfo> tenants))
+        {
+            var tenant = tenants.Find(t => t.TenantId == tenantId);
+            return tenant?.DatabaseName;
+        }
+        return null;
+    }
+}
+
+
+///
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddSingleton<CollectionConfigService>();
+
+var app = builder.Build();
+
+// Load collection configurations at startup
+var collectionConfigService = app.Services.GetRequiredService<CollectionConfigService>();
+await collectionConfigService.LoadCollectionConfigAsync();
+
+
+///[ApiController]
+[Route("api/[controller]")]
+public class DataController : ControllerBase
+{
+    private readonly CollectionConfigService _configService;
+    private readonly IMongoClient _globalClient;
+    private readonly IMemoryCache _cache;
+    
+    public DataController(CollectionConfigService configService, IMongoClient globalClient, IMemoryCache cache)
+    {
+        _configService = configService;
+        _globalClient = globalClient;
+        _cache = cache;
+    }
+
+    [HttpPost("fetch")]
+    public IActionResult FetchData([FromHeader] string customerId, [FromBody] FetchRequest request)
+    {
+        string collectionName = request.CollectionName;
+
+        if (_configService.IsGlobalCollection(collectionName))
+        {
+            var globalDb = _globalClient.GetDatabase("GlobalAdminDB");
+            var collection = globalDb.GetCollection<BsonDocument>(collectionName);
+            var result = collection.Find(FilterDefinition<BsonDocument>.Empty).ToList();
+            return Ok(result);
+        }
+        else if (_configService.IsTenantCollection(collectionName))
+        {
+            string tenantDbName = _configService.GetTenantDatabase(customerId);
+            if (string.IsNullOrEmpty(tenantDbName))
+                return BadRequest("Invalid tenant ID");
+
+            if (!_cache.TryGetValue($"TenantDB-{customerId}", out IMongoClient tenantClient))
+            {
+                // Get connection string from Key Vault and create new MongoClient
+                var secretClient = new SecretClient(new Uri("https://your-keyvault.vault.azure.net/"), new DefaultAzureCredential());
+                var secret = secretClient.GetSecret($"Tenant-{customerId}-DB-Connection");
+                tenantClient = new MongoClient(secret.Value);
+
+                // Cache the client
+                _cache.Set($"TenantDB-{customerId}", tenantClient, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(55)
+                });
+            }
+
+            var tenantDb = tenantClient.GetDatabase(tenantDbName);
+            var collection = tenantDb.GetCollection<BsonDocument>(collectionName);
+            var result = collection.Find(FilterDefinition<BsonDocument>.Empty).ToList();
+
+            return Ok(result);
+        }
+
+        return BadRequest("Unknown collection reference");
+    }
+}
