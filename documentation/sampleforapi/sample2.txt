@@ -267,3 +267,130 @@ public class SecretService
             : throw new Exception("Global Admin DB connection is missing in cache!");
     }
 }
+
+
+///
+// Load Key Vault URL from appsettings.json
+string keyVaultUrl = builder.Configuration["KeyVault:Url"];
+
+if (string.IsNullOrEmpty(keyVaultUrl))
+{
+    throw new InvalidOperationException("KeyVault URL is not configured properly.");
+}
+
+// Register SecretClient as a singleton
+builder.Services.AddSingleton(new SecretClient(new Uri(keyVaultUrl), new DefaultAzureCredential()));
+
+
+
+The global admin DB connection string is stored in Key Vault. When the app starts, it fetches the connection string, creates a MongoDB client, and caches it.
+
+builder.Services.AddSingleton<IMemoryCache, MemoryCache>();
+builder.Services.AddSingleton<IMongoClient>(serviceProvider =>
+{
+    var secretClient = serviceProvider.GetRequiredService<SecretClient>();
+    var cache = serviceProvider.GetRequiredService<IMemoryCache>();
+
+    // Fetch MongoDB connection string from Key Vault
+    KeyVaultSecret secret = secretClient.GetSecret("GlobalAdminDBConnectionString");
+    string connectionString = secret.Value;
+
+    if (string.IsNullOrEmpty(connectionString))
+    {
+        throw new InvalidOperationException("Failed to retrieve the MongoDB connection string from Key Vault.");
+    }
+
+    // Store in memory cache with 55-minute expiration
+    cache.Set("GlobalAdminDB", connectionString, new MemoryCacheEntryOptions
+    {
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(55)
+    });
+
+    return new MongoClient(connectionString);
+});
+
+///
+
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Caching.Memory;
+using Azure.Security.KeyVault.Secrets;
+using MongoDB.Driver;
+
+public class MongoDbCacheRefreshService : BackgroundService
+{
+    private readonly IMemoryCache _cache;
+    private readonly SecretClient _secretClient;
+    private readonly IServiceProvider _serviceProvider;
+
+    public MongoDbCacheRefreshService(IMemoryCache cache, SecretClient secretClient, IServiceProvider serviceProvider)
+    {
+        _cache = cache;
+        _secretClient = secretClient;
+        _serviceProvider = serviceProvider;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                KeyVaultSecret secret = await _secretClient.GetSecretAsync("GlobalAdminDBConnectionString");
+                string connectionString = secret.Value;
+
+                if (!string.IsNullOrEmpty(connectionString))
+                {
+                    _cache.Set("GlobalAdminDB", connectionString, new MemoryCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(55)
+                    });
+
+                    // Optionally, recreate and replace the MongoClient
+                    using var scope = _serviceProvider.CreateScope();
+                    var mongoClient = new MongoClient(connectionString);
+                    _cache.Set("MongoClient", mongoClient);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error refreshing MongoDB connection: {ex.Message}");
+            }
+
+            await Task.Delay(TimeSpan.FromMinutes(55), stoppingToken);
+        }
+    }
+}
+
+
+
+builder.Services.AddHostedService<MongoDbCacheRefreshService>();
+
+
+
+Retrieving Cached MongoDB Client in Controllers
+Anywhere in your WebAPI controllers or services, retrieve the MongoDB client dynamically like this:
+
+public class MyService
+{
+    private readonly IMemoryCache _cache;
+
+    public MyService(IMemoryCache cache)
+    {
+        _cache = cache;
+    }
+
+    public IMongoDatabase GetDatabase()
+    {
+        if (_cache.TryGetValue("GlobalAdminDB", out string connectionString))
+        {
+            var client = new MongoClient(connectionString);
+            return client.GetDatabase("YourDatabaseName");
+        }
+
+        throw new InvalidOperationException("MongoDB connection is not available.");
+    }
+}
+
