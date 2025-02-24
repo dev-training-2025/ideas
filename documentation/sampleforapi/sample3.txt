@@ -1,0 +1,57 @@
+[ApiController]
+[Route("api/connection")]
+public class ConnectionController : ControllerBase
+{
+    private readonly IMemoryCache _cache;
+    private readonly MongoClientService _mongoService;
+
+    public ConnectionController(IMemoryCache cache, MongoClientService mongoService)
+    {
+        _cache = cache;
+        _mongoService = mongoService;
+    }
+
+    [HttpPost("refresh")]
+    public async Task<IActionResult> RefreshMongoConnection()
+    {
+        // Remove cached MongoDB connection string
+        _cache.Remove("GlobalDbConnection");
+
+        // Reinitialize MongoDB connection
+        await _mongoService.ReinitializeMongoClient();
+
+        return Ok(new { message = "MongoDB connection refreshed successfully." });
+    }
+}
+
+
+
+public class MongoClientService
+{
+    private readonly IMemoryCache _cache;
+    private readonly SecretClient _secretClient;
+    private MongoClient _mongoClient;
+
+    public MongoClientService(IMemoryCache cache, SecretClient secretClient)
+    {
+        _cache = cache;
+        _secretClient = secretClient;
+    }
+
+    public async Task ReinitializeMongoClient()
+    {
+        var mongoUri = await _secretClient.GetSecretAsync("GlobalMongoConnectionString");
+
+        _mongoClient = new MongoClient(mongoUri.Value.Value);
+        _cache.Set("GlobalDbConnection", _mongoClient, TimeSpan.FromMinutes(55));
+    }
+
+    public IMongoDatabase GetGlobalDatabase()
+    {
+        if (!_cache.TryGetValue("GlobalDbConnection", out MongoClient client))
+        {
+            throw new Exception("MongoDB connection is not initialized.");
+        }
+        return client.GetDatabase("GlobalAdminDB");
+    }
+}
