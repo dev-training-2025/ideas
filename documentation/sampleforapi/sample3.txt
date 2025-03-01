@@ -55,3 +55,100 @@ public class MongoClientService
         return client.GetDatabase("GlobalAdminDB");
     }
 }
+
+
+
+
+
+///
+using Azure.Security.KeyVault.Secrets;
+using Azure.Identity;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
+using MongoDB.Driver;
+using System;
+using System.Threading.Tasks;
+
+public class MongoDbService
+{
+    private readonly IConfiguration _configuration;
+    private readonly SecretClient _keyVaultClient;
+    private readonly IMemoryCache _cache;
+    private IMongoClient _mongoClient;
+    private IMongoDatabase _database;
+    private readonly string _cacheKey = "MongoDbConnection";
+
+    public MongoDbService(IConfiguration configuration, IMemoryCache cache)
+    {
+        _configuration = configuration;
+        _cache = cache;
+
+        string environment = _configuration["ASPNETCORE_ENVIRONMENT"];
+
+        if (environment != "local")
+        {
+            string keyVaultUrl = _configuration["KeyVault:URL"];
+            _keyVaultClient = new SecretClient(new Uri(keyVaultUrl), new DefaultAzureCredential());
+        }
+
+        // Initialize MongoDB connection
+        LoadMongoConnection();
+    }
+
+    private void LoadMongoConnection()
+    {
+        string connectionString = GetMongoConnectionString().Result;
+        _cache.Set(_cacheKey, connectionString, TimeSpan.FromMinutes(55));
+
+        _mongoClient = new MongoClient(connectionString);
+        _database = _mongoClient.GetDatabase(_configuration["MongoSettings:DatabaseName"]);
+    }
+
+    private async Task<string> GetMongoConnectionString()
+    {
+        string environment = _configuration["ASPNETCORE_ENVIRONMENT"];
+
+        if (environment == "local")
+        {
+            return _configuration["MongoSettings:ConnectionString"];
+        }
+        else
+        {
+            KeyVaultSecret secret = await _keyVaultClient.GetSecretAsync("GlobalMongoConnectionString");
+            return secret.Value;
+        }
+    }
+
+    public IMongoDatabase GetDatabase() => _database;
+
+    public void RefreshMongoConnection()
+    {
+        LoadMongoConnection();
+    }
+}
+
+
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<MongoDbService>();
+
+
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("api/cache")]
+public class CacheController : ControllerBase
+{
+    private readonly MongoDbService _mongoDbService;
+
+    public CacheController(MongoDbService mongoDbService)
+    {
+        _mongoDbService = mongoDbService;
+    }
+
+    [HttpPost("refresh")]
+    public IActionResult RefreshMongoCache()
+    {
+        _mongoDbService.RefreshMongoConnection();
+        return Ok("MongoDB connection cache refreshed.");
+    }
+}
