@@ -152,3 +152,21 @@ public class CacheController : ControllerBase
         return Ok("MongoDB connection cache refreshed.");
     }
 }
+
+using System;
+using System.Threading.Tasks;
+
+public class CacheRefreshService
+{
+    private readonly MongoDbService _mongoDbService;
+
+    public CacheRefreshService(MongoDbService mongoDbService)
+    {
+        _mongoDbService = mongoDbService;
+    }
+
+    public void RefreshMongoCache()
+    {
+        _mongoDbService.RefreshMongoConnection();
+    }
+}
