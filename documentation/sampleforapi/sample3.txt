@@ -194,4 +194,88 @@ public class CacheController : ControllerBase
 }
 
 
+public class MongoDbService : IMongoDbService
+{
+    private MongoClient _mongoClient;
+    private readonly IKeyVaultService _keyVaultService;
+    private readonly IConfiguration _configuration;
+    private readonly object _lock = new();
+
+    public MongoDbService(IKeyVaultService keyVaultService, IConfiguration configuration)
+    {
+        _keyVaultService = keyVaultService;
+        _configuration = configuration;
+        LoadMongoConnection();
+    }
+
+    private void LoadMongoConnection()
+    {
+        try
+        {
+            string connectionString = GetMongoConnectionString().Result;
+
+            lock (_lock)
+            {
+                if (_mongoClient != null)
+                {
+                    _mongoClient.Cluster.Dispose(); // Dispose old connection
+                }
+
+                _mongoClient = new MongoClient(connectionString);
+            }
+        }
+        catch (Exception ex)
+        {
+            throw new Exception("An error occurred while establishing the MongoDB connection.", ex);
+        }
+    }
+
+    private async Task<string> GetMongoConnectionString()
+    {
+        // Use appsettings for local development
+        if (_configuration["Environment"] == "Local")
+        {
+            return _configuration.GetConnectionString("MongoDB");
+        }
+
+        // Fetch from Key Vault in non-local environments
+        return await _keyVaultService.GetSecretAsync("MongoDBConnectionString");
+    }
+
+    public void RefreshMongoConnection()
+    {
+        LoadMongoConnection();
+    }
+
+    public IMongoDatabase GetDatabase(string databaseName)
+    {
+        return _mongoClient.GetDatabase(databaseName);
+    }
+}
+
+
+
+private readonly object _lock = new(); // Lock object for thread safety
+
+private void LoadMongoConnection()
+{
+    try
+    {
+        string connectionString = GetMongoConnectionString().Result;
+
+        lock (_lock)  // Ensure only one thread updates the MongoClient at a time
+        {
+            if (_mongoClient != null)
+            {
+                _mongoClient.Cluster.Dispose(); // Dispose old client safely
+            }
+
+            _mongoClient = new MongoClient(connectionString); // Set new client
+        }
+    }
+    catch (Exception ex)
+    {
+        throw new Exception("An error occurred while establishing the MongoDB connection.", ex);
+    }
+}
 
