@@ -170,3 +170,28 @@ public class CacheRefreshService
         _mongoDbService.RefreshMongoConnection();
     }
 }
+
+
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("api/cache")]
+public class CacheController : ControllerBase
+{
+    private readonly CacheRefreshService _cacheRefreshService;
+
+    public CacheController(CacheRefreshService cacheRefreshService)
+    {
+        _cacheRefreshService = cacheRefreshService;
+    }
+
+    [HttpPost("refresh")]
+    public IActionResult RefreshCache()
+    {
+        _cacheRefreshService.RefreshMongoCache();
+        return Ok("Cache refreshed successfully.");
+    }
+}
+
+
+
