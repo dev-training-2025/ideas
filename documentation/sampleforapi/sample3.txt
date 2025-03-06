@@ -279,3 +279,154 @@ private void LoadMongoConnection()
     }
 }
 
+
+1. Introduce or Update Your IMongoDbService Interface
+Define an interface that exposes methods to get the current MongoDB client or a specific database:
+
+
+public interface IMongoDbService
+{
+    /// <summary>
+    /// Returns the current MongoClient instance.
+    /// </summary>
+    IMongoClient GetCurrentClient();
+
+    /// <summary>
+    /// Returns a specific database by name.
+    /// </summary>
+    IMongoDatabase GetDatabase(string dbName);
+
+    /// <summary>
+    /// Refreshes the MongoClient if needed (e.g., if connection string changes).
+    /// </summary>
+    void RefreshMongoConnection();
+}
+2. Implement MongoDbService
+Have a single class manage MongoDB connection creation and refresh logic. Any time you need a fresh client, you ask this service.
+
+
+using MongoDB.Driver;
+using Microsoft.Extensions.Configuration;
+
+public class MongoDbService : IMongoDbService
+{
+    private MongoClient _mongoClient;
+    private readonly IConfiguration _configuration;
+    // If you need Key Vault, inject it as well (e.g. IKeyVaultService)
+
+    public MongoDbService(IConfiguration configuration /*, IKeyVaultService keyVaultService */)
+    {
+        _configuration = configuration;
+        LoadMongoConnection();
+    }
+
+    private void LoadMongoConnection()
+    {
+        // 1. Fetch connection string from appsettings or Key Vault
+        string connectionString = GetMongoConnectionString();
+        
+        // 2. Create a new MongoClient
+        _mongoClient = new MongoClient(connectionString);
+    }
+
+    private string GetMongoConnectionString()
+    {
+        // If local, read from appsettings
+        if (_configuration["Environment"] == "Local")
+        {
+            return _configuration.GetConnectionString("MongoDB");
+        }
+        else
+        {
+            // Production example: fetch from Key Vault
+            // return keyVaultService.GetSecret("MongoDBConnectionString");
+            return "mongodb://someProductionUri";
+        }
+    }
+
+    public IMongoClient GetCurrentClient() => _mongoClient;
+
+    public IMongoDatabase GetDatabase(string dbName)
+    {
+        return _mongoClient.GetDatabase(dbName);
+    }
+
+    public void RefreshMongoConnection()
+    {
+        LoadMongoConnection(); // Recreate the client with a fresh connection string
+    }
+}
+Key point: We never store _mongoClient.GetDatabase(...) in a field. Instead, we get it on-demand.
+
+3. Remove Old Mongo References from Controllers/Services
+In your controllers or application services, delete any fields like:
+
+
+private readonly IMongoDatabase _db;
+private readonly IMongoCollection<Foo> _fooCollection;
+…and any code in constructors that references MongoClient or IMongoDatabase directly.
+
+4. Inject IMongoDbService Instead
+Wherever you need to talk to MongoDB, inject IMongoDbService and request the database at runtime:
+
+
+public class MyService
+{
+    private readonly IMongoDbService _mongoDbService;
+
+    public MyService(IMongoDbService mongoDbService)
+    {
+        _mongoDbService = mongoDbService;
+    }
+
+    public async Task DoSomethingAsync()
+    {
+        // 1. Get the current database
+        var db = _mongoDbService.GetDatabase("GlobalAdminDB");
+
+        // 2. Retrieve a collection on the fly
+        var collection = db.GetCollection<BsonDocument>("MyCollection");
+
+        // 3. Perform operations
+        var docs = await collection.Find(Builders<BsonDocument>.Filter.Empty).ToListAsync();
+        // ...
+    }
+}
+Why? Each time you call _mongoDbService.GetDatabase(...), you get the newest MongoClient if it was refreshed.
+
+5. Provide an API to Refresh MongoDB Client (If Needed)
+If the connection string rarely changes, you can still expose an endpoint to refresh the client if it does:
+
+
+[ApiController]
+[Route("api/config")]
+public class ConfigController : ControllerBase
+{
+    private readonly IMongoDbService _mongoDbService;
+
+    public ConfigController(IMongoDbService mongoDbService)
+    {
+        _mongoDbService = mongoDbService;
+    }
+
+    [HttpPost("refresh-mongo")]
+    public IActionResult RefreshMongoConnection()
+    {
+        _mongoDbService.RefreshMongoConnection();
+        return Ok("MongoDB connection refreshed.");
+    }
+}
+6. Register the Services in Program.cs
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add your service as a singleton (or as needed)
+builder.Services.AddSingleton<IMongoDbService, MongoDbService>();
+
+// Register any other services that rely on IMongoDbService
+builder.Services.AddScoped<MyService>();
+
+var app = builder.Build();
+app.MapControllers();
+app.Run();
+
