@@ -1,0 +1,224 @@
+A. Create a GlobalDbService (Singleton)
+Purpose: Provide a single MongoClient for the global admin database, used to read tenant config from an “admin” collection.
+
+public interface IGlobalDbService
+{
+    IMongoClient GetGlobalClient();
+    IMongoDatabase GetGlobalDatabase();
+    void RefreshGlobalConnection();
+}
+
+public class GlobalDbService : IGlobalDbService
+{
+    private MongoClient _globalClient;
+    private readonly IConfiguration _configuration;
+    private readonly object _lock = new();
+
+    public GlobalDbService(IConfiguration configuration)
+    {
+        _configuration = configuration;
+        LoadGlobalConnection();
+    }
+
+    private void LoadGlobalConnection()
+    {
+        lock (_lock)
+        {
+            // 1. Fetch connection string (local or Key Vault)
+            var connectionString = GetGlobalConnectionString();
+
+            // 2. Create a new MongoClient for the global admin DB
+            _globalClient = new MongoClient(connectionString);
+        }
+    }
+
+    private string GetGlobalConnectionString()
+    {
+        // Example: If "Environment" is local, read from appsettings; else from Key Vault
+        if (_configuration["Environment"] == "Local")
+        {
+            return _configuration.GetConnectionString("GlobalAdminMongo");
+        }
+        else
+        {
+            // e.g. fetch from Key Vault or other secure source
+            // return keyVaultService.GetSecret("GlobalAdminMongoConnectionString");
+            return "mongodb://someProductionUri";
+        }
+    }
+
+    public IMongoClient GetGlobalClient()
+    {
+        return _globalClient;
+    }
+
+    public IMongoDatabase GetGlobalDatabase()
+    {
+        // Suppose the global DB name is "GlobalAdminDB"
+        return _globalClient.GetDatabase("GlobalAdminDB");
+    }
+
+    public void RefreshGlobalConnection()
+    {
+        LoadGlobalConnection(); // Recreate the global client
+    }
+}
+
+Key Points:
+
+Singleton so it persists for the app lifetime.
+Stores only one _globalClient for the global admin DB.
+A refresh method in case the global connection string changes.
+
+A. Create a TenantDbService to Manage Tenant Clients
+Purpose: Dynamically create or retrieve per-tenant MongoClients. If each tenant has its own cluster or replica set, you can keep a 
+dictionary in memory. Alternatively, you can create them on-demand and not store them if you prefer.
+
+public interface ITenantDbService
+{
+    IMongoClient GetTenantClient(string tenantId);
+    IMongoDatabase GetTenantDatabase(string tenantId, string dbName);
+    void RefreshTenantConnection(string tenantId);
+}
+
+public class TenantDbService : ITenantDbService
+{
+    private readonly IGlobalDbService _globalDbService;
+    private readonly Dictionary<string, MongoClient> _tenantClients = new();
+    private readonly object _lock = new();
+
+    public TenantDbService(IGlobalDbService globalDbService)
+    {
+        _globalDbService = globalDbService;
+    }
+
+    public IMongoClient GetTenantClient(string tenantId)
+    {
+        lock (_lock)
+        {
+            if (_tenantClients.TryGetValue(tenantId, out var existingClient))
+            {
+                return existingClient;
+            }
+
+            // 1. Retrieve tenant config from the Global Admin DB
+            var tenantConfig = FetchTenantConfig(tenantId);
+
+            // 2. Create new client for this tenant
+            var client = new MongoClient(tenantConfig.ConnectionString);
+
+            _tenantClients[tenantId] = client;
+            return client;
+        }
+    }
+
+    public IMongoDatabase GetTenantDatabase(string tenantId, string dbName)
+    {
+        var client = GetTenantClient(tenantId);
+        return client.GetDatabase(dbName);
+    }
+
+    public void RefreshTenantConnection(string tenantId)
+    {
+        lock (_lock)
+        {
+            if (_tenantClients.ContainsKey(tenantId))
+            {
+                // Optionally dispose the old client or just let GC handle it
+                _tenantClients.Remove(tenantId);
+            }
+        }
+    }
+
+    private TenantConfig FetchTenantConfig(string tenantId)
+    {
+        // Example: read from the Global Admin DB's "Tenants" collection
+        var globalDb = _globalDbService.GetGlobalDatabase();
+        var tenantsColl = globalDb.GetCollection<TenantConfig>("Tenants");
+        return tenantsColl.Find(t => t.TenantId == tenantId).FirstOrDefault();
+    }
+}
+
+public class TenantConfig
+{
+    public string TenantId { get; set; }
+    public string ConnectionString { get; set; }
+    // Possibly more fields like DB name, etc.
+}
+
+public interface ITenantDbService
+{
+    IMongoClient GetTenantClient(string tenantId);
+    IMongoDatabase GetTenantDatabase(string tenantId, string dbName);
+    void RefreshTenantConnection(string tenantId);
+}
+
+public class TenantDbService : ITenantDbService
+{
+    private readonly IGlobalDbService _globalDbService;
+    private readonly Dictionary<string, MongoClient> _tenantClients = new();
+    private readonly object _lock = new();
+
+    public TenantDbService(IGlobalDbService globalDbService)
+    {
+        _globalDbService = globalDbService;
+    }
+
+    public IMongoClient GetTenantClient(string tenantId)
+    {
+        lock (_lock)
+        {
+            if (_tenantClients.TryGetValue(tenantId, out var existingClient))
+            {
+                return existingClient;
+            }
+
+            // 1. Retrieve tenant config from the Global Admin DB
+            var tenantConfig = FetchTenantConfig(tenantId);
+
+            // 2. Create new client for this tenant
+            var client = new MongoClient(tenantConfig.ConnectionString);
+
+            _tenantClients[tenantId] = client;
+            return client;
+        }
+    }
+
+    public IMongoDatabase GetTenantDatabase(string tenantId, string dbName)
+    {
+        var client = GetTenantClient(tenantId);
+        return client.GetDatabase(dbName);
+    }
+
+    public void RefreshTenantConnection(string tenantId)
+    {
+        lock (_lock)
+        {
+            if (_tenantClients.ContainsKey(tenantId))
+            {
+                // Optionally dispose the old client or just let GC handle it
+                _tenantClients.Remove(tenantId);
+            }
+        }
+    }
+
+    private TenantConfig FetchTenantConfig(string tenantId)
+    {
+        // Example: read from the Global Admin DB's "Tenants" collection
+        var globalDb = _globalDbService.GetGlobalDatabase();
+        var tenantsColl = globalDb.GetCollection<TenantConfig>("Tenants");
+        return tenantsColl.Find(t => t.TenantId == tenantId).FirstOrDefault();
+    }
+}
+
+public class TenantConfig
+{
+    public string TenantId { get; set; }
+    public string ConnectionString { get; set; }
+    // Possibly more fields like DB name, etc.
+}
+
+
+builder.Services.AddSingleton<IGlobalDbService, GlobalDbService>();
+builder.Services.AddSingleton<ITenantDbService, TenantDbService>();
+
