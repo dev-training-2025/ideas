@@ -193,3 +193,62 @@ No direct references to MongoClient—just a call to GetTenantDatabase(tenantId,
 builder.Services.AddSingleton<IGlobalDbService, GlobalDbService>();
 builder.Services.AddSingleton<ITenantDbService, TenantDbService>();
 
+using MongoDB.Driver;
+using System;
+using System.Collections.Concurrent;
+using System.Threading.Tasks;
+
+namespace DataStore.Services
+{
+    public class TenantDbService : ITenantDbService
+    {
+        private readonly IGlobalDbService _globalDbService;
+        private readonly IKeyVaultService _keyVaultService;
+        private readonly ConcurrentDictionary<string, IMongoClient> _tenantClients;
+
+        public TenantDbService(IGlobalDbService globalDbService, IKeyVaultService keyVaultService)
+        {
+            _globalDbService = globalDbService;
+            _keyVaultService = keyVaultService;
+            _tenantClients = new ConcurrentDictionary<string, IMongoClient>();
+        }
+
+        public async Task<IMongoDatabase> GetTenantDatabaseAsync(string tenantId)
+        {
+            // Step 1: Fetch the key vault secret name from the global database
+            var tenantConfigCollection = _globalDbService.GetDatabase().GetCollection<TenantConfig>("Tenants");
+            var tenantConfig = await tenantConfigCollection.Find(t => t.TenantId == tenantId).FirstOrDefaultAsync();
+
+            if (tenantConfig == null || string.IsNullOrEmpty(tenantConfig.MongoSecretName))
+            {
+                throw new Exception($"Tenant configuration not found for {tenantId}");
+            }
+
+            // Step 2: Retrieve the actual connection string from Key Vault
+            string connectionString = await _keyVaultService.GetSecretAsync(tenantConfig.MongoSecretName);
+
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                throw new Exception($"MongoDB connection string is missing for tenant {tenantId}");
+            }
+
+            // Step 3: Reuse or create a new MongoClient instance
+            var mongoClient = _tenantClients.GetOrAdd(tenantId, _ => new MongoClient(connectionString));
+
+            // Step 4: Return the tenant database
+            return mongoClient.GetDatabase(tenantConfig.DatabaseName);
+        }
+    }
+
+    public interface ITenantDbService
+    {
+        Task<IMongoDatabase> GetTenantDatabaseAsync(string tenantId);
+    }
+
+    public class TenantConfig
+    {
+        public string TenantId { get; set; }
+        public string MongoSecretName { get; set; }
+        public string DatabaseName { get; set; }
+    }
+}
