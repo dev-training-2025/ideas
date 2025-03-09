@@ -252,3 +252,43 @@ namespace DataStore.Services
         public string DatabaseName { get; set; }
     }
 }
+
+A service that loads this collection config at startup (or on demand), then exposes methods to check if a collection is global.
+
+public interface ICollectionConfigService
+{
+    bool IsGlobalCollection(string collectionName);
+}
+
+public class CollectionConfigService : ICollectionConfigService
+{
+    private readonly IGlobalDbService _globalDbService;
+    private HashSet<string> _systemCollections;
+
+    public CollectionConfigService(IGlobalDbService globalDbService)
+    {
+        _globalDbService = globalDbService;
+        LoadConfig();
+    }
+
+    private void LoadConfig()
+    {
+        var db = _globalDbService.GetGlobalDatabase();
+        var configColl = db.GetCollection<CollectionConfig>("CollectionConfig");
+        var config = configColl.Find(c => c.Id == "global-config").FirstOrDefault();
+
+        _systemCollections = new HashSet<string>(config.SystemCollections);
+    }
+
+    public bool IsGlobalCollection(string collectionName)
+    {
+        return _systemCollections.Contains(collectionName);
+    }
+
+}
+
+public class CollectionConfig
+{
+    public string Id { get; set; }
+    public List<string> SystemCollections { get; set; }
+}
