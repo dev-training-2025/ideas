@@ -1,0 +1,94 @@
+using System.Threading;
+using System.Threading.Tasks;
+using Xunit;
+using Moq;
+using MongoDB.Driver;
+using System.Collections.Generic;
+
+public class StructuredDataRepositoryTests
+{
+    private readonly Mock<IMongoCollection<TestDocument>> _mockCollection;
+    private readonly Mock<IMongoDatabase> _mockDatabase;
+    private readonly Mock<IMongoClient> _mockClient;
+    private readonly StructuredDataRepository _repository;
+
+    public StructuredDataRepositoryTests()
+    {
+        _mockCollection = new Mock<IMongoCollection<TestDocument>>();
+        _mockDatabase = new Mock<IMongoDatabase>();
+        _mockClient = new Mock<IMongoClient>();
+
+        _mockDatabase.Setup(db => db.GetCollection<TestDocument>("TestCollection", null))
+                     .Returns(_mockCollection.Object);
+
+        _mockClient.Setup(client => client.GetDatabase(It.IsAny<string>(), null))
+                   .Returns(_mockDatabase.Object);
+
+        _repository = new StructuredDataRepository(_mockClient.Object);
+    }
+
+    [Fact]
+    public async Task FindOneAsync_ShouldReturnDocument_WhenExcludeIsNotYes()
+    {
+        // Arrange
+        var expectedDocument = new TestDocument { Id = "123", Name = "Valid Record", Exclude = "No" };
+        var filter = Builders<TestDocument>.Filter.Eq(doc => doc.Id, "123");
+
+        var mockCursor = new Mock<IAsyncCursor<TestDocument>>();
+        mockCursor.SetupSequence(cursor => cursor.MoveNext(It.IsAny<CancellationToken>()))
+                  .Returns(true)  // Data exists
+                  .Returns(false); // No more data
+
+        mockCursor.Setup(cursor => cursor.Current)
+                  .Returns(new List<TestDocument> { expectedDocument });
+
+        _mockCollection.Setup(col => col.FindAsync(
+                                It.IsAny<FilterDefinition<TestDocument>>(),
+                                It.IsAny<FindOptions<TestDocument, TestDocument>>(),
+                                It.IsAny<CancellationToken>()))
+                       .ReturnsAsync(mockCursor.Object);
+
+        // Act
+        var result = await _repository.FindOneAsync("TestCollection", filter);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(expectedDocument.Id, result.Id);
+    }
+
+    [Fact]
+    public async Task FindOneAsync_ShouldReturnNull_WhenExcludeIsYes()
+    {
+        // Arrange
+        var deletedDocument = new TestDocument { Id = "123", Name = "Deleted Record", Exclude = "Yes" };
+        var filter = Builders<TestDocument>.Filter.Eq(doc => doc.Id, "123");
+
+        var mockCursor = new Mock<IAsyncCursor<TestDocument>>();
+        mockCursor.SetupSequence(cursor => cursor.MoveNext(It.IsAny<CancellationToken>()))
+                  .Returns(true)
+                  .Returns(false);
+
+        mockCursor.Setup(cursor => cursor.Current)
+                  .Returns(new List<TestDocument> { deletedDocument });
+
+        _mockCollection.Setup(col => col.FindAsync(
+                                It.IsAny<FilterDefinition<TestDocument>>(),
+                                It.IsAny<FindOptions<TestDocument, TestDocument>>(),
+                                It.IsAny<CancellationToken>()))
+                       .ReturnsAsync(mockCursor.Object);
+
+        // Act
+        var result = await _repository.FindOneAsync("TestCollection", filter);
+
+        // Assert
+        Assert.Null(result);
+    }
+}
+
+// Example Test Model
+public class TestDocument
+{
+    public string Id { get; set; }
+    public string Name { get; set; }
+    public string Exclude { get; set; } // Can be "Yes"/"No"
+}
