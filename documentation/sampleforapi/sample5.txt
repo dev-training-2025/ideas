@@ -184,3 +184,10 @@ public class AggregateRequest
     public string CollectionName { get; set; }
     public string PipelineJson { get; set; }
 }
+
+{
+  "_id": "user_abc123",
+  "aId": "a-unique-user-id",
+  "email": "user@example.com",
+  "name": "Alice Smith"
+}
