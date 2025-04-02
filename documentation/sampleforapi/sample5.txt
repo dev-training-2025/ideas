@@ -92,3 +92,95 @@ public class TestDocument
     public string Name { get; set; }
     public string Exclude { get; set; } // Can be "Yes"/"No"
 }
+
+
+
+
+{
+  "_id": "upr_001",
+  "userId": "user_abc123",
+  "custId": "cust_1",
+  "projectId": "project_123",
+  "roleIds": ["role_a", "role_b"]
+}
+
+Advantages of This Approach
+Separation of Concerns:
+Each collection has a single responsibility (e.g., user info, cust info, project info, role definitions, role assignments), which makes it easier to update and maintain.
+
+Simplified Queries:
+You can use MongoDB’s aggregation framework (with $lookup) to join these collections as needed. For example, to get the list of projects and roles a user has, you could aggregate the UserProjectRoles collection and then join with Users, Projects, and Roles.
+
+Flexibility in Updates:
+Changing a role’s definition, adding or removing a role from a user, or updating cust details doesn’t require modifying nested arrays across multiple documents.
+
+Scalability:
+This normalized approach tends to scale better for large datasets where users have access to many cust and projects, and where role assignments change frequently.
+
+Easy to Enforce Access Control:
+You can build queries like “find all UserProjectRoles where projectId = 'project_123' and roleIds contains 'role_a'” to quickly retrieve all annotaters for a project.
+
+
+[
+  { "$match": { "projectId": "project_123", "roleIds": "role_a" } },
+  {
+    "$lookup": {
+      "from": "Users",
+      "localField": "userId",
+      "foreignField": "_id",
+      "as": "userInfo"
+    }
+  },
+  { "$unwind": "$userInfo" },
+  {
+    "$project": {
+      "_id": 0,
+      "userId": 1,
+      "userName": "$userInfo.name",
+      "email": "$userInfo.email"
+    }
+  }
+]
+
+This pipeline:
+
+Filters the UserProjectRoles collection for entries for Project 123 with the role role_a.
+Joins with the Users collection to get detailed user information.
+Projects a concise result set.
+
+
+
+Direct Aggregate Endpoint
+Description:
+Expose an API endpoint that accepts an aggregation pipeline (in JSON format) as part of the request. The endpoint then passes this pipeline to MongoDB’s aggregation framework and returns the results.
+
+Advantages:
+
+Flexibility: Clients can build complex queries (joins via $lookup, filtering with $match, grouping with $group, etc.) dynamically.
+Unified API: One endpoint can serve multiple query needs instead of having several dedicated endpoints.
+Considerations:
+
+Security: Allowing arbitrary pipelines can be risky. You need to validate or sanitize the incoming pipeline to prevent misuse (e.g., disallow certain operators like $where or $function that might lead to performance or security issues).
+Performance: Aggregation pipelines can be complex and resource-intensive. Implement limits on pipeline length, stage complexity, and runtime.
+Validation: You may want to provide schema validation (perhaps using FluentValidation) on the pipeline structure before executing it.
+
+[HttpPost("aggregate")]
+public async Task<IActionResult> Aggregate([FromHeader] string custId, [FromBody] AggregateRequest request)
+{
+  
+    var collection = db.GetCollection<BsonDocument>(request.CollectionName);
+
+    // Validate/sanitize the pipeline here as needed
+    var pipeline = BsonDocument.Parse(request.PipelineJson);
+
+    var results = await collection.Aggregate<BsonDocument>(pipeline).ToListAsync();
+
+    return Ok(results);
+}
+
+
+public class AggregateRequest
+{
+    public string CollectionName { get; set; }
+    public string PipelineJson { get; set; }
+}
