@@ -191,3 +191,77 @@ public class AggregateRequest
   "email": "user@example.com",
   "name": "Alice Smith"
 }
+
+
+
+When you need to execute a multi-document transaction across two databases, MongoDB requires that both operations run on the same MongoClient (and, by extension, the same cluster). If SRE has enforced separate connection strings with different credentials for customer databases and the global admin database, this creates a challenge for running a single transaction across them.
+
+Here are some points and potential approaches:
+
+---
+
+### **Key Points**
+
+1. **MongoDB Transactions Requirement**  
+   - **Multi-document transactions** require that all participating databases be accessed through a **single MongoClient instance**.  
+   - That client must be initialized with a **connection string that targets the same underlying cluster**.
+
+2. **Separate Connection Strings with Different Credentials**  
+   - If your customer connection strings and global admin connection string are **different (with different user:password)**, they typically represent **different clients**.  
+   - These separate clients cannot share a session, so you cannot run a transaction that spans both using the native MongoDB transaction mechanism.
+
+3. **Potential Workarounds**  
+   - **Unification of Connection Strings:**  
+     - **Negotiate with SRE:** If both the customer and global admin databases are part of the same MongoDB Atlas cluster, you might be able to request a unified connection string for transactional operations. This unified string would use credentials that have access to both databases.
+   - **Outbox Pattern or Distributed Transactions:**  
+     - If unification isn’t an option, consider using an **outbox pattern**. In this approach, you separate the two operations into distinct transactions  and then use an outbox and background process to ensure eventual consistency.  
+     - Alternatively, you’d have to implement a form of a two-phase commit at the application level, which is considerably more complex and generally not recommended.
+
+---
+ If Separate Clients Are Mandatory → Use Outbox Pattern
+If you cannot use a shared MongoClient:
+
+Insert the client record in its database.
+
+Insert an "outbox event" in a global outbox collection (without a transaction).
+
+A background worker reads the outbox and completes the secondary operation asynchronously.
+
+Advantages:
+
+Works even when using separate connections.
+
+Provides eventual consistency without requiring distributed transactions.
+
+ManualRollback
+Best Effort Two-Step Commit (Manual Rollback)
+Since we can't use MongoDB's built-in transactions across separate connections, we simulate a transaction by:
+
+First, inserting the record into the customer database.
+
+If successful, inserting the record into the admin database.
+
+If step 2 fails, we manually delete the first record to "rollback".
+
+ Pros:
+
+Ensures that if outbox insert fails, the customer insert is undone.
+Cons:
+
+If the rollback (delete) fails, there could still be partial data left in the customer database.
+
+Option 2: Outbox Pattern (Asynchronous Processing)
+Instead of inserting to both databases synchronously, we only insert to the customer database and queue the admin DB insert separately.
+
+Insert the customer record.
+
+Insert an event into an "Outbox" collection in the customer database (instead of directly writing to the admin DB).
+
+A background worker reads the Outbox collection and processes the admin DB insert asynchronously.
+
+How It Works
+Your API only writes to the customer DB and queues the second insert.
+
+A worker service runs in the background and reads unprocessed outbox events.
+
+The worker then inserts the event into the admin DB.
