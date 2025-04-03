@@ -265,3 +265,14 @@ Your API only writes to the customer DB and queues the second insert.
 A worker service runs in the background and reads unprocessed outbox events.
 
 The worker then inserts the event into the admin DB.
+
+Pros:
+
+The API response time is faster because the admin DB insert happens asynchronously.
+
+More resilient to failures, since the worker can retry failed events.
+Cons:
+
+Not truly transactional (but safe as long as the worker is reliable).
+
+There may be a slight delay before the event is available in the admin DB.
